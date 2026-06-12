@@ -1,3 +1,5 @@
+import json
+
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
@@ -89,9 +91,25 @@ async def auth_callback(request: Request):
         return JSONResponse({"error": "missing code"}, status_code=400)
 
     tokens = await ap.AuthPlusClient().exchange_code(code, flow["code_verifier"])
-    creds = await get_testmu_credentials(tokens)
 
     s = get_settings()
+    # Dev aid: until we're provisioned for credential retrieval, don't crash — show what
+    # auth-plus returned (decoded, unverified) so we can confirm the flow works end to end.
+    if s.credential_method == "introspect" and not s.authplus_introspect_api_secret:
+        import jwt
+
+        claims = jwt.decode(tokens["access_token"], options={"verify_signature": False})
+        resp = HTMLResponse(
+            "<h1>Token exchange OK ✓</h1>"
+            "<p>auth-plus returned tokens, but introspect isn't configured yet, so no "
+            "credentials were fetched or injected.</p>"
+            f"<h3>Access-token claims</h3><pre>{json.dumps(claims, indent=2)}</pre>"
+        )
+        resp.delete_cookie(FLOW_COOKIE, path="/")
+        return resp
+
+    creds = await get_testmu_credentials(tokens)
+
     project_id = flow.get("project_id")
     vercel_token = flow.get("vercel_access_token")
     injected = False
@@ -109,12 +127,21 @@ async def auth_callback(request: Request):
     nxt = flow.get("next")
     if nxt:
         resp = RedirectResponse(nxt)
+        resp.delete_cookie(FLOW_COOKIE, path="/")
+        return resp
+
+    if injected:
+        body = "<p>Browsercloud credentials injected into your project.</p>"
     else:
-        msg = (
-            "<p>Browsercloud credentials injected into your project.</p>"
-            if injected
-            else "<p>Authenticated, but no target Vercel project was supplied to inject into.</p>"
+        # Dev aid: no Vercel project in this flow, so show what introspect returned
+        # (access_key masked) to confirm credential retrieval works.
+        ak = creds["access_key"]
+        masked = f"{ak[:4]}…{ak[-4:]}" if len(ak) > 8 else "…"
+        body = (
+            "<p>Authenticated — no target Vercel project, so showing the fetched "
+            "credentials to confirm introspect works:</p>"
+            f"<pre>username:   {creds['username']}\naccess_key: {masked}</pre>"
         )
-        resp = HTMLResponse(f"<h1>Connected ✓</h1>{msg}")
+    resp = HTMLResponse(f"<h1>Connected ✓</h1>{body}")
     resp.delete_cookie(FLOW_COOKIE, path="/")
     return resp

@@ -35,6 +35,10 @@ def main() -> None:
         help="HTTPS callback (repeatable). Must EXACTLY match AUTHPLUS_REDIRECT_URI.",
     )
     p.add_argument("--name", default="Browsercloud for Vercel")
+    # web/confidential is correct for the deployed HTTPS integration; native/public is
+    # needed for LOCAL testing because web clients may not allow http loopback redirects.
+    p.add_argument("--client-type", choices=["confidential", "public"], default="confidential")
+    p.add_argument("--application-type", choices=["web", "native"], default="web")
     args = p.parse_args()
 
     body = {
@@ -42,8 +46,8 @@ def main() -> None:
         "redirect_uris": args.redirect_uris,
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
-        "client_type": "confidential",
-        "application_type": "web",
+        "client_type": args.client_type,
+        "application_type": args.application_type,
     }
     url = f"{AUTH_BASE[args.env]}/oauth2/register"
     r = httpx.post(url, json=body, timeout=20)

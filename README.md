@@ -61,11 +61,26 @@ the repo in Vercel; set the same env vars in the Vercel project settings. Then r
 the **production** redirect URI with auth-plus and create the Vercel Integration in the
 [Integration Console](https://vercel.com/dashboard/integrations/console).
 
-## Open items pending from the backend team
+## Verified against stage (2026-06)
 
-1. **Confirm `web`/`confidential` DCR is accepted** on auth-plus (vs the native reference).
-2. **`access_key` retrieval method** — provision us for `introspect`, or expose a
-   `/userinfo` returning `username`+`access_key`. (`access_key` is not in the planned
-   JWT claims.) Controlled by `CREDENTIAL_METHOD`.
-3. **OAEP hash** for the introspect `Api-Secret` (SHA-256 vs SHA-1).
-4. **Signup-capable consent UI** + optional `login_hint` (email prefill) for new users.
+- ✅ **Flow B works end to end** — login → consent → authorize → code → token exchange →
+  **introspect → real `username` + `access_key`**. The full TestMu side is proven.
+- ✅ **Credential retrieval via `introspect`** — the Force team provided a pre-built
+  service-to-service `Api-Secret` (base64 RSA-OAEP blob), set as
+  `AUTHPLUS_INTROSPECT_API_SECRET`. We send it as the `Api-Secret` header; no client-side
+  RSA encryption needed (so `scripts/build_api_secret.py` is unused in this path).
+- ⚠️ **Web client + `http` loopback is rejected at the authorize step.** DCR registers a
+  `web`/`confidential` client with an `http://127.0.0.1` redirect, but the authorize
+  endpoint returns 400 on approval. **Local dev uses a `native`/`public` client**
+  (loopback + PKCE, no secret); the deployed integration uses `web`/`confidential` + HTTPS.
+- ⚠️ **The access token does NOT contain `username` or `access_key`.** Claims seen:
+  `sub`, `user_id`/`id`, `client_id`, `iss`, `aud`, `exp` — which is why `introspect` is
+  mandatory.
+
+## Open items
+
+1. **Vercel side (Flow A)** — create the integration in the Vercel Integration Console to
+   get `VERCEL_CLIENT_ID/SECRET`, then test env-var injection into a real project.
+2. **Signup-capable consent UI** + optional `login_hint` (email prefill) for new users.
+3. **Production client** — register the `web`/`confidential` client with the deployed
+   HTTPS callback once the host is known.
