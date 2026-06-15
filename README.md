@@ -69,10 +69,14 @@ the **production** redirect URI with auth-plus and create the Vercel Integration
   service-to-service `Api-Secret` (base64 RSA-OAEP blob), set as
   `AUTHPLUS_INTROSPECT_API_SECRET`. We send it as the `Api-Secret` header; no client-side
   RSA encryption needed (so `scripts/build_api_secret.py` is unused in this path).
-- ⚠️ **Web client + `http` loopback is rejected at the authorize step.** DCR registers a
-  `web`/`confidential` client with an `http://127.0.0.1` redirect, but the authorize
-  endpoint returns 400 on approval. **Local dev uses a `native`/`public` client**
-  (loopback + PKCE, no secret); the deployed integration uses `web`/`confidential` + HTTPS.
+- ⚠️ **The `web`/`confidential` client does not work in the stage consent UI.**
+  - `web` + `http` loopback → authorize returns **400** on approval.
+  - `web` + HTTPS → the authorize page loads (`200` server-side) but the consent SPA
+    renders a **404** mid-flow (an internal lookup for the confidential client fails).
+  - **Workaround (used in prod):** a `native`/`public` client + PKCE (no secret) clears
+    consent for both loopback (local) and HTTPS (deployed). PKCE protects the code
+    exchange, so this is safe for our server-side flow.
+  - **Backend gap to flag:** make `web`/`confidential` clients usable in the consent UI.
 - ⚠️ **The access token does NOT contain `username` or `access_key`.** Claims seen:
   `sub`, `user_id`/`id`, `client_id`, `iss`, `aud`, `exp` — which is why `introspect` is
   mandatory.
