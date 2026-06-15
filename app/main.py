@@ -20,8 +20,8 @@ _COOKIE_KW = dict(httponly=True, secure=True, samesite="lax", max_age=600, path=
 async def index() -> str:
     return (
         "<h1>Browsercloud for Vercel</h1>"
-        "<p>OAuth integration service. Install from the Vercel Marketplace to connect "
-        "your TestMu AI / Browsercloud credentials.</p>"
+        "<p>Install from the Vercel Marketplace to connect "
+        "your TestMu AI / Browsercloud credentials and use the platform from inside Vercel.</p>"
     )
 
 
