@@ -5,6 +5,7 @@ from . import authplus as ap
 from . import vercel as vc
 from .config import get_settings
 from .credentials import get_testmu_credentials
+from .logo import LOGO_DATA_URI
 from .pkce import generate_pkce, generate_state
 from .state import dump_state, load_state
 
@@ -14,7 +15,7 @@ FLOW_COOKIE = "bc_flow"
 _COOKIE_KW = dict(httponly=True, secure=True, samesite="lax", max_age=600, path="/")
 
 
-LOGO_URL = "https://www.testmuai.com/logo.png"
+LOGO_URL = LOGO_DATA_URI
 
 
 def _page(title: str, message: str, status_code: int = 200) -> HTMLResponse:
