@@ -73,28 +73,27 @@ async def vercel_callback(request: Request):
         resp.set_cookie(FLOW_COOKIE, dump_state(flow), **_COOKIE_KW)
         return resp
 
+    # The configuration lists granted project IDs for a "specific projects" install;
+    # for "All Projects" it returns None, and the token can't enumerate them.
     granted = config.get("projects")
-    if granted is None:  # "All Projects" install → enumerate them
-        granted = await vc.list_projects(flow["vercel_access_token"], flow["team_id"])
-    # entries may be plain ids or project objects
     project_ids = [g["id"] if isinstance(g, dict) else g for g in (granted or [])]
+
+    if not project_ids:
+        resp = HTMLResponse(
+            "<h1>Select specific projects</h1>"
+            "<p>Browser Cloud adds your TestMu AI credentials to the projects you choose. "
+            "Please remove the integration and re-install it, selecting "
+            "<b>specific project(s)</b> instead of “All Projects.”</p>"
+        )
+        resp.set_cookie(FLOW_COOKIE, dump_state(flow), **_COOKIE_KW)
+        return resp
 
     if len(project_ids) == 1:
         # Scoped to a single project → no need to ask; go straight to login.
         flow["project_id"] = project_ids[0]
         return _start_authplus(flow)
 
-    if not project_ids:
-        resp = HTMLResponse(
-            "<h1>No accessible projects</h1>"
-            f"<pre>projectSelection: {config.get('projectSelection')}\n"
-            f"config keys: {sorted(config.keys())}\n"
-            f"projects: {config.get('projects')}</pre>"
-        )
-        resp.set_cookie(FLOW_COOKIE, dump_state(flow), **_COOKIE_KW)
-        return resp
-
-    # Multiple projects ("All Projects" install) → let the user choose.
+    # Multiple specific projects → let the user choose one.
     items = "".join(
         f'<li><a href="/api/integrations/vercel/select?project_id={pid}">{pid}</a></li>'
         for pid in project_ids
