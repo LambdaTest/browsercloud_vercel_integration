@@ -63,26 +63,41 @@ async def vercel_callback(request: Request):
         "next": params.get("next"),
     }
 
-    projects = await vc.list_projects(flow["vercel_access_token"], flow["team_id"])
+    # Ask the install which projects it was granted (authoritative for scoped installs).
+    try:
+        config = await vc.get_configuration(
+            flow["vercel_access_token"], flow["configuration_id"], flow["team_id"]
+        )
+    except Exception as e:  # surface instead of a blind 500 while wiring up
+        resp = HTMLResponse(f"<h1>Config fetch failed</h1><pre>{e!r}</pre>")
+        resp.set_cookie(FLOW_COOKIE, dump_state(flow), **_COOKIE_KW)
+        return resp
 
-    if len(projects) == 1:
+    granted = config.get("projects")
+    if granted is None:  # "All Projects" install → enumerate them
+        granted = await vc.list_projects(flow["vercel_access_token"], flow["team_id"])
+    # entries may be plain ids or project objects
+    project_ids = [g["id"] if isinstance(g, dict) else g for g in (granted or [])]
+
+    if len(project_ids) == 1:
         # Scoped to a single project → no need to ask; go straight to login.
-        flow["project_id"] = projects[0]["id"]
+        flow["project_id"] = project_ids[0]
         return _start_authplus(flow)
 
-    if not projects:
+    if not project_ids:
         resp = HTMLResponse(
             "<h1>No accessible projects</h1>"
-            "<p>This integration can't see any projects to add credentials to. "
-            "Re-install and grant access to at least one project.</p>"
+            f"<pre>projectSelection: {config.get('projectSelection')}\n"
+            f"config keys: {sorted(config.keys())}\n"
+            f"projects: {config.get('projects')}</pre>"
         )
         resp.set_cookie(FLOW_COOKIE, dump_state(flow), **_COOKIE_KW)
         return resp
 
     # Multiple projects ("All Projects" install) → let the user choose.
     items = "".join(
-        f'<li><a href="/api/integrations/vercel/select?project_id={p["id"]}">{p["name"]}</a></li>'
-        for p in projects
+        f'<li><a href="/api/integrations/vercel/select?project_id={pid}">{pid}</a></li>'
+        for pid in project_ids
     )
     resp = HTMLResponse(
         "<h1>Connect Browser Cloud</h1>"

@@ -57,6 +57,26 @@ async def upsert_env_var(
         return r.json()
 
 
+async def get_configuration(access_token: str, configuration_id: str, team_id: str | None = None) -> dict:
+    """Fetch this integration install's configuration.
+
+    For a project-scoped install, the returned object carries the granted project IDs
+    (`projects`) and `projectSelection` ("selected" or "all") — the authoritative answer
+    to "which projects did the user grant?", which the bare /v9/projects list does not give.
+    """
+    params = {}
+    if team_id:
+        params["teamId"] = team_id
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.get(
+            f"{VERCEL_API}/v1/integrations/configuration/{configuration_id}",
+            params=params,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
 async def list_projects(access_token: str, team_id: str | None = None, limit: int = 100) -> list[dict]:
     """List the team's projects (needs the Projects: Read scope).
 
