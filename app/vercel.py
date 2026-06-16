@@ -55,3 +55,22 @@ async def upsert_env_var(
         )
         r.raise_for_status()
         return r.json()
+
+
+async def list_projects(access_token: str, team_id: str | None = None, limit: int = 100) -> list[dict]:
+    """List the team's projects (needs the Projects: Read scope).
+
+    Account-level installs don't tell us which project to target, so we list them
+    and let the user pick.
+    """
+    params = {"limit": str(limit)}
+    if team_id:
+        params["teamId"] = team_id
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.get(
+            f"{VERCEL_API}/v9/projects",
+            params=params,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        r.raise_for_status()
+        return r.json().get("projects", [])

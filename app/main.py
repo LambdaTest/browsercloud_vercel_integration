@@ -30,12 +30,25 @@ async def healthz() -> dict:
     return {"ok": True}
 
 
+def _start_authplus(flow: dict) -> RedirectResponse:
+    """Attach PKCE + state to the flow and redirect into the TestMu (auth-plus) login."""
+    verifier, challenge = generate_pkce()
+    flow["code_verifier"] = verifier
+    flow["state"] = generate_state()
+    resp = RedirectResponse(ap.AuthPlusClient().authorize_url(flow["state"], challenge))
+    resp.set_cookie(FLOW_COOKIE, dump_state(flow), **_COOKIE_KW)
+    return resp
+
+
 @app.get("/api/integrations/vercel/callback")
 async def vercel_callback(request: Request):
-    """Flow A entrypoint: Vercel redirects here post-install.
+    """Flow A entrypoint: Vercel redirects here after the user connects the integration.
 
-    Query: code, configurationId, teamId, next, (projectId for project-scoped installs).
-    We exchange the code, stash the Vercel context, then kick off Flow B (auth-plus login).
+    The marketplace install is account-level — it gives us configurationId/teamId/next
+    but no project. So we list the projects our (scoped) token can reach:
+      - exactly one  -> inject straight into it,
+      - more than one -> show a picker,
+      - none          -> explain.
     """
     params = request.query_params
     code = params.get("code")
@@ -43,25 +56,53 @@ async def vercel_callback(request: Request):
         return JSONResponse({"error": "missing code"}, status_code=400)
 
     token = await vc.exchange_code(code)
-
-    verifier, challenge = generate_pkce()
-    state = generate_state()
     flow = {
         "vercel_access_token": token.get("access_token"),
         "team_id": token.get("team_id") or params.get("teamId"),
         "configuration_id": params.get("configurationId"),
-        "project_id": params.get("projectId") or token.get("project_id"),
         "next": params.get("next"),
-        "code_verifier": verifier,
-        "state": state,
-        # --- diagnostics: what Vercel actually sent us ---
-        "dbg_params": {k: v for k, v in params.items() if k != "code"},
-        "dbg_token_keys": sorted(token.keys()),
     }
 
-    resp = RedirectResponse(ap.AuthPlusClient().authorize_url(state, challenge))
+    projects = await vc.list_projects(flow["vercel_access_token"], flow["team_id"])
+
+    if len(projects) == 1:
+        # Scoped to a single project → no need to ask; go straight to login.
+        flow["project_id"] = projects[0]["id"]
+        return _start_authplus(flow)
+
+    if not projects:
+        resp = HTMLResponse(
+            "<h1>No accessible projects</h1>"
+            "<p>This integration can't see any projects to add credentials to. "
+            "Re-install and grant access to at least one project.</p>"
+        )
+        resp.set_cookie(FLOW_COOKIE, dump_state(flow), **_COOKIE_KW)
+        return resp
+
+    # Multiple projects ("All Projects" install) → let the user choose.
+    items = "".join(
+        f'<li><a href="/api/integrations/vercel/select?project_id={p["id"]}">{p["name"]}</a></li>'
+        for p in projects
+    )
+    resp = HTMLResponse(
+        "<h1>Connect Browser Cloud</h1>"
+        "<p>Choose a project to add your TestMu AI credentials to:</p>"
+        f"<ul>{items}</ul>"
+    )
     resp.set_cookie(FLOW_COOKIE, dump_state(flow), **_COOKIE_KW)
     return resp
+
+
+@app.get("/api/integrations/vercel/select")
+async def vercel_select(request: Request):
+    """Picker target: remember the chosen project, then start the TestMu login."""
+    project_id = request.query_params.get("project_id")
+    cookie = request.cookies.get(FLOW_COOKIE)
+    flow = load_state(cookie) if cookie else None
+    if not flow or not project_id:
+        return JSONResponse({"error": "missing flow or project_id"}, status_code=400)
+    flow["project_id"] = project_id
+    return _start_authplus(flow)
 
 
 @app.get("/api/auth/login")
