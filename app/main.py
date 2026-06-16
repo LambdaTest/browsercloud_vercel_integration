@@ -1,5 +1,3 @@
-import json
-
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
@@ -10,18 +8,33 @@ from .credentials import get_testmu_credentials
 from .pkce import generate_pkce, generate_state
 from .state import dump_state, load_state
 
-app = FastAPI(title="Browsercloud × Vercel Integration")
+app = FastAPI(title="Browser Cloud for Vercel")
 
 FLOW_COOKIE = "bc_flow"
 _COOKIE_KW = dict(httponly=True, secure=True, samesite="lax", max_age=600, path="/")
 
 
+def _page(title: str, message: str, status_code: int = 200) -> HTMLResponse:
+    """A minimal, clean branded page for user-facing success/error states."""
+    html = (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        f"<title>{title}</title>"
+        "<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,"
+        "Helvetica,Arial,sans-serif;max-width:34rem;margin:18vh auto;padding:0 1.5rem;"
+        "color:#111;line-height:1.55}h1{font-size:1.5rem;margin:0 0 .5rem}"
+        "p{color:#475569}</style></head>"
+        f"<body><h1>{title}</h1><p>{message}</p></body></html>"
+    )
+    return HTMLResponse(html, status_code=status_code)
+
+
 @app.get("/", response_class=HTMLResponse)
-async def index() -> str:
-    return (
-        "<h1>Browsercloud for Vercel</h1>"
-        "<p>Install from the Vercel Marketplace to connect "
-        "your TestMu AI / Browsercloud credentials and use the platform from inside Vercel.</p>"
+async def index() -> HTMLResponse:
+    return _page(
+        "Browser Cloud for Vercel",
+        "Install from the Vercel Marketplace to connect your TestMu AI / Browser Cloud "
+        "credentials to your projects.",
     )
 
 
@@ -68,10 +81,13 @@ async def vercel_callback(request: Request):
         config = await vc.get_configuration(
             flow["vercel_access_token"], flow["configuration_id"], flow["team_id"]
         )
-    except Exception as e:  # surface instead of a blind 500 while wiring up
-        resp = HTMLResponse(f"<h1>Config fetch failed</h1><pre>{e!r}</pre>")
-        resp.set_cookie(FLOW_COOKIE, dump_state(flow), **_COOKIE_KW)
-        return resp
+    except Exception:  # don't leak internals; show a clean message
+        return _page(
+            "Something went wrong",
+            "We couldn't read your integration configuration from Vercel. "
+            "Please try installing again, or contact support.",
+            status_code=502,
+        )
 
     # The configuration lists granted project IDs for a "specific projects" install;
     # for "All Projects" it returns None, and the token can't enumerate them.
@@ -79,14 +95,12 @@ async def vercel_callback(request: Request):
     project_ids = [g["id"] if isinstance(g, dict) else g for g in (granted or [])]
 
     if not project_ids:
-        resp = HTMLResponse(
-            "<h1>Select specific projects</h1>"
-            "<p>Browser Cloud adds your TestMu AI credentials to the projects you choose. "
-            "Please remove the integration and re-install it, selecting "
-            "<b>specific project(s)</b> instead of “All Projects.”</p>"
+        return _page(
+            "Select specific projects",
+            "Browser Cloud adds your TestMu AI credentials to the projects you choose. "
+            "Please remove the integration and re-install it, selecting specific "
+            "project(s) instead of “All Projects.”",
         )
-        resp.set_cookie(FLOW_COOKIE, dump_state(flow), **_COOKIE_KW)
-        return resp
 
     # Inject into every selected project. Carry the list through the TestMu login.
     flow["project_ids"] = project_ids
@@ -125,22 +139,15 @@ async def auth_callback(request: Request):
     tokens = await ap.AuthPlusClient().exchange_code(code, flow["code_verifier"])
 
     s = get_settings()
-    # Dev aid: until we're provisioned for credential retrieval, don't crash — show what
-    # auth-plus returned (decoded, unverified) so we can confirm the flow works end to end.
-    if s.credential_method == "introspect" and not s.authplus_introspect_api_secret:
-        import jwt
-
-        claims = jwt.decode(tokens["access_token"], options={"verify_signature": False})
-        resp = HTMLResponse(
-            "<h1>Token exchange OK ✓</h1>"
-            "<p>auth-plus returned tokens, but introspect isn't configured yet, so no "
-            "credentials were fetched or injected.</p>"
-            f"<h3>Access-token claims</h3><pre>{json.dumps(claims, indent=2)}</pre>"
+    try:
+        creds = await get_testmu_credentials(tokens)
+    except Exception:
+        return _page(
+            "Couldn't connect",
+            "We signed you in to TestMu AI but couldn't retrieve your credentials. "
+            "Please try again, or contact support if this keeps happening.",
+            status_code=502,
         )
-        resp.delete_cookie(FLOW_COOKIE, path="/")
-        return resp
-
-    creds = await get_testmu_credentials(tokens)
 
     # Inject the credentials into every selected project (back-compat with single project_id).
     project_ids = flow.get("project_ids") or (
@@ -159,32 +166,33 @@ async def auth_callback(request: Request):
                 team_id=flow.get("team_id"),
             )
             results[pid] = "ok"
-        except Exception as e:  # surface instead of 500 while wiring up Flow A
-            results[pid] = f"error: {e!r}"
+        except Exception:
+            results[pid] = "error"
 
-    injected = bool(results) and all(v == "ok" for v in results.values())
+    ok_count = sum(1 for v in results.values() if v == "ok")
+    injected = bool(results) and ok_count == len(results)
 
     nxt = flow.get("next")
     if injected and nxt:
+        # Success → hand control back to Vercel (closes the install window).
         resp = RedirectResponse(nxt)
         resp.delete_cookie(FLOW_COOKIE, path="/")
         return resp
 
-    # Shown only if injection didn't fully succeed (or there's no Vercel context).
-    ak = creds["access_key"]
-    masked = f"{ak[:4]}…{ak[-4:]}" if len(ak) > 8 else "…"
-    diag = {
-        "injected": injected,
-        "results_per_project": results,
-        "project_ids": project_ids,
-        "next": nxt,
-        "team_id": flow.get("team_id"),
-        "configuration_id": flow.get("configuration_id"),
-    }
-    body = (
-        f"<pre>username:   {creds['username']}\naccess_key: {masked}\n\n"
-        f"{json.dumps(diag, indent=2)}</pre>"
+    if injected:
+        return _page(
+            "Connected ✓",
+            f"Browser Cloud credentials were added to {ok_count} project(s). "
+            "You can close this window.",
+        )
+    if results:
+        return _page(
+            "Couldn't finish",
+            f"Added credentials to {ok_count} of {len(results)} project(s), but the rest "
+            "failed. Please try again, or contact support.",
+            status_code=502,
+        )
+    return _page(
+        "Signed in ✓",
+        "Authenticated with TestMu AI, but there were no projects to update.",
     )
-    resp = HTMLResponse(f"<h1>Install diagnostics</h1>{body}")
-    resp.delete_cookie(FLOW_COOKIE, path="/")
-    return resp
