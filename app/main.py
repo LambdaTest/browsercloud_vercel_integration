@@ -88,34 +88,8 @@ async def vercel_callback(request: Request):
         resp.set_cookie(FLOW_COOKIE, dump_state(flow), **_COOKIE_KW)
         return resp
 
-    if len(project_ids) == 1:
-        # Scoped to a single project → no need to ask; go straight to login.
-        flow["project_id"] = project_ids[0]
-        return _start_authplus(flow)
-
-    # Multiple specific projects → let the user choose one.
-    items = "".join(
-        f'<li><a href="/api/integrations/vercel/select?project_id={pid}">{pid}</a></li>'
-        for pid in project_ids
-    )
-    resp = HTMLResponse(
-        "<h1>Connect Browser Cloud</h1>"
-        "<p>Choose a project to add your TestMu AI credentials to:</p>"
-        f"<ul>{items}</ul>"
-    )
-    resp.set_cookie(FLOW_COOKIE, dump_state(flow), **_COOKIE_KW)
-    return resp
-
-
-@app.get("/api/integrations/vercel/select")
-async def vercel_select(request: Request):
-    """Picker target: remember the chosen project, then start the TestMu login."""
-    project_id = request.query_params.get("project_id")
-    cookie = request.cookies.get(FLOW_COOKIE)
-    flow = load_state(cookie) if cookie else None
-    if not flow or not project_id:
-        return JSONResponse({"error": "missing flow or project_id"}, status_code=400)
-    flow["project_id"] = project_id
+    # Inject into every selected project. Carry the list through the TestMu login.
+    flow["project_ids"] = project_ids
     return _start_authplus(flow)
 
 
@@ -168,23 +142,27 @@ async def auth_callback(request: Request):
 
     creds = await get_testmu_credentials(tokens)
 
-    project_id = flow.get("project_id")
+    # Inject the credentials into every selected project (back-compat with single project_id).
+    project_ids = flow.get("project_ids") or (
+        [flow["project_id"]] if flow.get("project_id") else []
+    )
     vercel_token = flow.get("vercel_access_token")
-    injected = False
-    inject_error = None
-    if project_id and vercel_token:
+    results: dict[str, str] = {}
+    for pid in project_ids if vercel_token else []:
         try:
             await vc.upsert_env_var(
-                vercel_token, project_id, s.inject_username_key, creds["username"],
+                vercel_token, pid, s.inject_username_key, creds["username"],
                 team_id=flow.get("team_id"),
             )
             await vc.upsert_env_var(
-                vercel_token, project_id, s.inject_access_key_key, creds["access_key"],
+                vercel_token, pid, s.inject_access_key_key, creds["access_key"],
                 team_id=flow.get("team_id"),
             )
-            injected = True
+            results[pid] = "ok"
         except Exception as e:  # surface instead of 500 while wiring up Flow A
-            inject_error = repr(e)
+            results[pid] = f"error: {e!r}"
+
+    injected = bool(results) and all(v == "ok" for v in results.values())
 
     nxt = flow.get("next")
     if injected and nxt:
@@ -192,19 +170,16 @@ async def auth_callback(request: Request):
         resp.delete_cookie(FLOW_COOKIE, path="/")
         return resp
 
-    # Diagnostics page (shown until injection succeeds) — reveals exactly what Vercel sent,
-    # so we can see why no project was targeted.
+    # Shown only if injection didn't fully succeed (or there's no Vercel context).
     ak = creds["access_key"]
     masked = f"{ak[:4]}…{ak[-4:]}" if len(ak) > 8 else "…"
     diag = {
         "injected": injected,
-        "inject_error": inject_error,
-        "project_id": project_id,
+        "results_per_project": results,
+        "project_ids": project_ids,
         "next": nxt,
         "team_id": flow.get("team_id"),
         "configuration_id": flow.get("configuration_id"),
-        "vercel_params_received": flow.get("dbg_params"),
-        "vercel_token_keys": flow.get("dbg_token_keys"),
     }
     body = (
         f"<pre>username:   {creds['username']}\naccess_key: {masked}\n\n"
