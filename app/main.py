@@ -14,18 +14,34 @@ FLOW_COOKIE = "bc_flow"
 _COOKIE_KW = dict(httponly=True, secure=True, samesite="lax", max_age=600, path="/")
 
 
+LOGO_URL = "https://www.testmuai.com/logo.png"
+
+
 def _page(title: str, message: str, status_code: int = 200) -> HTMLResponse:
-    """A minimal, clean branded page for user-facing success/error states."""
-    html = (
-        "<!doctype html><html><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        f"<title>{title}</title>"
-        "<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,"
-        "Helvetica,Arial,sans-serif;max-width:34rem;margin:18vh auto;padding:0 1.5rem;"
-        "color:#111;line-height:1.55}h1{font-size:1.5rem;margin:0 0 .5rem}"
-        "p{color:#475569}</style></head>"
-        f"<body><h1>{title}</h1><p>{message}</p></body></html>"
-    )
+    """A sleek, branded page for user-facing success/error states."""
+    html = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>
+*{{box-sizing:border-box}}
+body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+background:radial-gradient(1200px 600px at 50% -10%,#ede9fe 0%,#eef2ff 35%,#f8fafc 100%);
+color:#0f172a;padding:1.5rem}}
+.card{{background:#fff;max-width:30rem;width:100%;padding:2.75rem 2.5rem;border-radius:20px;
+box-shadow:0 20px 60px rgba(76,29,149,.12);border:1px solid rgba(15,23,42,.06);text-align:center}}
+.logo{{height:38px;width:auto;margin-bottom:1.75rem}}
+h1{{font-size:1.4rem;margin:0 0 .6rem;letter-spacing:-.02em;font-weight:700}}
+p{{color:#475569;line-height:1.6;margin:0;font-size:.975rem}}
+.foot{{margin-top:1.75rem;font-size:.78rem;color:#94a3b8}}
+</style></head>
+<body><div class="card">
+<img class="logo" src="{LOGO_URL}" alt="TestMu AI">
+<h1>{title}</h1>
+<p>{message}</p>
+<div class="foot">Browser Cloud · TestMu AI</div>
+</div></body></html>"""
     return HTMLResponse(html, status_code=status_code)
 
 
