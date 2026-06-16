@@ -27,10 +27,12 @@ def _page(title: str, message: str, status_code: int = 200) -> HTMLResponse:
 *{{box-sizing:border-box}}
 body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
 font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
-background:radial-gradient(1200px 600px at 50% -10%,#ede9fe 0%,#eef2ff 35%,#f8fafc 100%);
+background:radial-gradient(1100px 600px at 50% -10%,#cffafe 0%,#d1fae5 42%,#f0fdfa 100%);
 color:#0f172a;padding:1.5rem}}
-.card{{background:#fff;max-width:30rem;width:100%;padding:2.75rem 2.5rem;border-radius:20px;
-box-shadow:0 20px 60px rgba(76,29,149,.12);border:1px solid rgba(15,23,42,.06);text-align:center}}
+.card{{background:linear-gradient(#ffffff,#f4fffb);max-width:30rem;width:100%;
+padding:2.75rem 2.5rem;border-radius:22px;border:1px solid rgba(13,148,136,.14);
+box-shadow:0 1px 0 rgba(255,255,255,.9) inset,0 12px 22px rgba(6,95,70,.12),
+0 30px 60px rgba(6,95,70,.18);text-align:center;transform:translateZ(0)}}
 .logo{{height:38px;width:auto;margin-bottom:1.75rem}}
 h1{{font-size:1.4rem;margin:0 0 .6rem;letter-spacing:-.02em;font-weight:700}}
 p{{color:#475569;line-height:1.6;margin:0;font-size:.975rem}}
