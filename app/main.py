@@ -54,6 +54,9 @@ async def vercel_callback(request: Request):
         "next": params.get("next"),
         "code_verifier": verifier,
         "state": state,
+        # --- diagnostics: what Vercel actually sent us ---
+        "dbg_params": {k: v for k, v in params.items() if k != "code"},
+        "dbg_token_keys": sorted(token.keys()),
     }
 
     resp = RedirectResponse(ap.AuthPlusClient().authorize_url(state, challenge))
@@ -113,35 +116,45 @@ async def auth_callback(request: Request):
     project_id = flow.get("project_id")
     vercel_token = flow.get("vercel_access_token")
     injected = False
+    inject_error = None
     if project_id and vercel_token:
-        await vc.upsert_env_var(
-            vercel_token, project_id, s.inject_username_key, creds["username"],
-            team_id=flow.get("team_id"),
-        )
-        await vc.upsert_env_var(
-            vercel_token, project_id, s.inject_access_key_key, creds["access_key"],
-            team_id=flow.get("team_id"),
-        )
-        injected = True
+        try:
+            await vc.upsert_env_var(
+                vercel_token, project_id, s.inject_username_key, creds["username"],
+                team_id=flow.get("team_id"),
+            )
+            await vc.upsert_env_var(
+                vercel_token, project_id, s.inject_access_key_key, creds["access_key"],
+                team_id=flow.get("team_id"),
+            )
+            injected = True
+        except Exception as e:  # surface instead of 500 while wiring up Flow A
+            inject_error = repr(e)
 
     nxt = flow.get("next")
-    if nxt:
+    if injected and nxt:
         resp = RedirectResponse(nxt)
         resp.delete_cookie(FLOW_COOKIE, path="/")
         return resp
 
-    if injected:
-        body = "<p>Browsercloud credentials injected into your project.</p>"
-    else:
-        # Dev aid: no Vercel project in this flow, so show what introspect returned
-        # (access_key masked) to confirm credential retrieval works.
-        ak = creds["access_key"]
-        masked = f"{ak[:4]}…{ak[-4:]}" if len(ak) > 8 else "…"
-        body = (
-            "<p>Authenticated — no target Vercel project, so showing the fetched "
-            "credentials to confirm introspect works:</p>"
-            f"<pre>username:   {creds['username']}\naccess_key: {masked}</pre>"
-        )
-    resp = HTMLResponse(f"<h1>Connected ✓</h1>{body}")
+    # Diagnostics page (shown until injection succeeds) — reveals exactly what Vercel sent,
+    # so we can see why no project was targeted.
+    ak = creds["access_key"]
+    masked = f"{ak[:4]}…{ak[-4:]}" if len(ak) > 8 else "…"
+    diag = {
+        "injected": injected,
+        "inject_error": inject_error,
+        "project_id": project_id,
+        "next": nxt,
+        "team_id": flow.get("team_id"),
+        "configuration_id": flow.get("configuration_id"),
+        "vercel_params_received": flow.get("dbg_params"),
+        "vercel_token_keys": flow.get("dbg_token_keys"),
+    }
+    body = (
+        f"<pre>username:   {creds['username']}\naccess_key: {masked}\n\n"
+        f"{json.dumps(diag, indent=2)}</pre>"
+    )
+    resp = HTMLResponse(f"<h1>Install diagnostics</h1>{body}")
     resp.delete_cookie(FLOW_COOKIE, path="/")
     return resp
