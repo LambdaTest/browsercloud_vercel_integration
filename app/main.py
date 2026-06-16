@@ -34,7 +34,7 @@ color:#0f172a;padding:1.5rem}}
 padding:2.75rem 2.5rem;border-radius:22px;border:1px solid rgba(13,148,136,.14);
 box-shadow:0 1px 0 rgba(255,255,255,.9) inset,0 12px 22px rgba(6,95,70,.12),
 0 30px 60px rgba(6,95,70,.18);text-align:center;transform:translateZ(0)}}
-.logo{{height:40px;width:auto;max-width:80%;margin-bottom:1.75rem}}
+.logo{{height:36px;width:auto;max-width:80%;margin-bottom:1.75rem}}
 h1{{font-size:1.4rem;margin:0 0 .6rem;letter-spacing:-.02em;font-weight:700}}
 p{{color:#475569;line-height:1.6;margin:0;font-size:.975rem}}
 .foot{{margin-top:1.75rem;font-size:.78rem;color:#94a3b8}}
